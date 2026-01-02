@@ -1,0 +1,10 @@
+# ocultar archivos log y excel
+*.log
+*.xls
+*.xlsx
+
+# ocultar entornos virtuales de Python
+venv/
+env/
+__pycache__/
+.venv/
