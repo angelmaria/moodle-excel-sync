@@ -182,5 +182,5 @@ Para reportar problemas o sugerencias, abre un issue en GitHub.
 
 ---
 
-**Autor**: Cash  
+**Autor**: [Angel Martinez](mailto:angelmaria75@gmail.com)  
 **Última actualización**: 3 de enero de 2026
