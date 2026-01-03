@@ -2,6 +2,7 @@
 *.log
 *.xls
 *.xlsx
+*.csv
 
 # ocultar entornos virtuales de Python
 venv/
