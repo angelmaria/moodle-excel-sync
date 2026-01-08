@@ -1,0 +1,24 @@
+Se encontraron emails duplicados (se usará solo la primera aparición):
+ - melasevilla65@gmail.com en filas [248, 291]
+ - drmsvmck53@gmail.com en filas [150, 292]
+ - barbaralerdocontreras@gmail.com en filas [135, 293]
+ - vazquez.anaisabel@yahoo.com en filas [272, 294]
+ - mpapelera@hotmail.com en filas [295, 330]
+
+⚠ CHEQUEO DE DISCREPANCIAS EN DUPLICADOS:
+  ⚠ melasevilla65@gmail.com:
+      Fila 248: Mela Sevilla
+      Fila 291: Carmen Sevilla
+      → REVISAR: ¿Mismo usuario o dos personas distintas?
+  ⚠ drmsvmck53@gmail.com:
+      Fila 150: Susana Mackinley
+      Fila 292: Susana McKinley
+      → REVISAR: ¿Mismo usuario o dos personas distintas?
+  ⚠ barbaralerdocontreras@gmail.com:
+      Fila 135: Barbara Lerdo de Tejada
+      Fila 293: Bárbara Bárbara
+      → REVISAR: ¿Mismo usuario o dos personas distintas?
+  ⚠ mpapelera@hotmail.com:
+      Fila 295: Maria del Carmen Maya Hernandez
+      Fila 330: Mario Enrique Flores Cortes
+      → REVISAR: ¿Mismo usuario o dos personas distintas?

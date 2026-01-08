@@ -2,12 +2,14 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 BASE_DIR = Path(__file__).resolve().parent
-INPUT_XLSX = BASE_DIR / "registro_curso_amor_sexualidad.xlsx"
-OUTPUT_XLSX = BASE_DIR / "registro_curso_amor_sexualidad_rellenado.xlsx"
+INPUT_XLSX = BASE_DIR / "registro_curso_amor_sexualidad2.xlsx"
+OUTPUT_XLSX = BASE_DIR / "registro_curso_amor_sexualidad2_rellenado.xlsx"
+WARN_LOG = BASE_DIR / "excel_completion_warnings.txt"
 
 SHEET_NAME = None  # None = hoja activa; o pon el nombre exacto, p.ej. "Hoja1"
 
 COL_NOMBRE = "Nombre"
+COL_APELLIDOS = "Apellidos"
 COL_CORREO = "Correo"
 COL_USUARIO = "Usuario"
 COL_CONTRASENA = "Contraseña"
@@ -39,16 +41,17 @@ def main():
         if isinstance(v, str) and v.strip():
             headers[v.strip()] = col_idx
 
-    for required in (COL_NOMBRE, COL_CORREO, COL_USUARIO, COL_CONTRASENA):
+    for required in (COL_NOMBRE, COL_APELLIDOS, COL_CORREO, COL_USUARIO, COL_CONTRASENA):
         if required not in headers:
             raise KeyError(f"No encuentro la columna {required!r}. Cabeceras detectadas: {list(headers.keys())}")
 
     c_nombre = headers[COL_NOMBRE]
+    c_apellidos = headers[COL_APELLIDOS]
     c_correo = headers[COL_CORREO]
     c_usuario = headers[COL_USUARIO]
     c_contra = headers[COL_CONTRASENA]
 
-    # 1) Validar unicidad de email
+    # 1) Validar unicidad de email (avisar pero no abortar)
     seen = {}
     duplicates = {}
     for r in range(2, ws.max_row + 1):
@@ -61,11 +64,46 @@ def main():
         else:
             seen[correo_norm] = r
 
+    warnings = []
     if duplicates:
-        msg_lines = ["Se encontraron emails duplicados (deben ser únicos):"]
+        warnings.append("Se encontraron emails duplicados (se usará solo la primera aparición):")
         for email, rows in duplicates.items():
-            msg_lines.append(f" - {email} en filas {rows}")
-        raise ValueError("\n".join(msg_lines))
+            warnings.append(f" - {email} en filas {rows}")
+        
+        # 2) Revisar si los duplicados tienen nombres/apellidos diferentes
+        warnings.append("\n⚠ CHEQUEO DE DISCREPANCIAS EN DUPLICADOS:")
+        for email, rows in duplicates.items():
+            nombres = []
+            for r in rows:
+                nombre = ws.cell(row=r, column=c_nombre).value
+                apellidos = ws.cell(row=r, column=c_apellidos).value
+                nombres.append({
+                    'fila': r,
+                    'nombre': (nombre or "").strip(),
+                    'apellidos': (apellidos or "").strip(),
+                    'nombre_completo': f"{(nombre or '').strip()} {(apellidos or '').strip()}".strip()
+                })
+            
+            # Comparar si son idénticos
+            nombre_ref = nombres[0]['nombre_completo']
+            discrepancia = False
+            for n in nombres[1:]:
+                if n['nombre_completo'].lower() != nombre_ref.lower():
+                    discrepancia = True
+                    break
+            
+            if discrepancia:
+                warnings.append(f"  ⚠ {email}:")
+                for n in nombres:
+                    warnings.append(f"      Fila {n['fila']}: {n['nombre_completo']}")
+                warnings.append(f"      → REVISAR: ¿Mismo usuario o dos personas distintas?")
+
+        txt = "\n".join(warnings)
+        print(txt)
+        try:
+            WARN_LOG.write_text(txt + "\n", encoding="utf-8")
+        except Exception:
+            pass
 
     # 2) Rellenar Usuario y Contraseña cuando falte Usuario
     changed = 0
@@ -89,7 +127,10 @@ def main():
         changed += 1
 
     wb.save(OUTPUT_XLSX)
-    print(f"OK. Filas actualizadas: {changed}. Guardado en: {OUTPUT_XLSX}")
+    msg_final = f"OK. Filas actualizadas: {changed}. Guardado en: {OUTPUT_XLSX}"
+    if duplicates:
+        msg_final += " [⚠ AVISO: Emails duplicados rellenados en todas sus filas; solo el primero se registrará en Moodle]"
+    print(msg_final)
 
 if __name__ == "__main__":
     main()

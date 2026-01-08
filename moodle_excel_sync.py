@@ -3,6 +3,7 @@
 Script simple para crear/editar usuarios en Moodle desde Excel
 """
 
+from pathlib import Path
 import openpyxl
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -15,22 +16,15 @@ from webdriver_manager.chrome import ChromeDriverManager
 import time
 from datetime import datetime
 
-EXCEL_FILE = '/Users/cash/Desktop/TomasMelendo/Registro_curso_Amor_sexualidad.xlsx'
-LOG_FILE = '/Users/cash/Desktop/TomasMelendo/log_creacion_usuarios.txt'
+BASE_DIR = Path(__file__).resolve().parent
+EXCEL_FILE = BASE_DIR / 'registro_curso_amor_sexualidad2_rellenado.xlsx'
+LOG_FILE = BASE_DIR / 'log_creacion_usuarios.txt'
 
 # ===== CONFIGURACIÓN DE FILAS A PROCESAR =====
 # Define qué filas del Excel procesará el script
-# Opción 1: Rango continuo
-FILAS_A_PROCESAR = list(range(181, 285))  # Filas 181 a 284
-
-# Opción 2: Filas específicas (descomenta para usar)
-# FILAS_A_PROCESAR = [177, 178, 179, 180]
-
-# Opción 3: Reintentos de filas específicas (descomenta para usar)
-# FILAS_A_PROCESAR = [254, 275]
-
-# Opción 4: Una sola fila
-# FILAS_A_PROCESAR = [180]
+# Si FILAS_A_PROCESAR es None, se procesará desde FILA_INICIO hasta la última fila del Excel
+FILA_INICIO = 291
+FILAS_A_PROCESAR = None  # p.ej. list(range(291, 331)) si quieres forzar un rango específico
 # ============================================
 
 def log_msg(mensaje):
@@ -65,6 +59,16 @@ def leer_registros_excel(filas):
             })
     
     return registros
+
+def obtener_filas_desde(inicio: int):
+    """Devuelve lista de filas desde 'inicio' hasta el final del Excel"""
+    wb = openpyxl.load_workbook(EXCEL_FILE, read_only=True)
+    ws = wb.active
+    max_row = ws.max_row
+    wb.close()
+    filas = list(range(inicio, max_row + 1))
+    log_msg(f"Rango detectado: fila {inicio} hasta fila {max_row} (total: {len(filas)} filas)")
+    return filas
 
 def login_moodle(driver):
     """Inicia sesión en Moodle"""
@@ -406,7 +410,8 @@ def main():
         login_moodle(driver)
         
         # Procesar registros según configuración
-        registros = leer_registros_excel(FILAS_A_PROCESAR)
+        filas_a_procesar = FILAS_A_PROCESAR or obtener_filas_desde(FILA_INICIO)
+        registros = leer_registros_excel(filas_a_procesar)
         
         log_msg(f"\nProcesando {len(registros)} registros...")
         for r in registros:
