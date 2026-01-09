@@ -17,14 +17,14 @@ import time
 from datetime import datetime
 
 BASE_DIR = Path(__file__).resolve().parent
-EXCEL_FILE = BASE_DIR / 'registro_curso_amor_sexualidad2_rellenado.xlsx'
-LOG_FILE = BASE_DIR / 'log_creacion_usuarios.txt'
+EXCEL_FILE = BASE_DIR / 'registro_curso_amor_sexualidad3_faltantes_rellenado.xlsx'
+LOG_FILE = BASE_DIR / 'log_creacion_usuarios_faltantes3.txt'
 
 # ===== CONFIGURACIÓN DE FILAS A PROCESAR =====
 # Define qué filas del Excel procesará el script
 # Si FILAS_A_PROCESAR es None, se procesará desde FILA_INICIO hasta la última fila del Excel
-FILA_INICIO = 291
-FILAS_A_PROCESAR = None  # p.ej. list(range(291, 331)) si quieres forzar un rango específico
+FILA_INICIO = 2  # Primera fila de datos (encabezados en fila 1)
+FILAS_A_PROCESAR = None  # Procesa todas las filas desde FILA_INICIO hasta el final
 # ============================================
 
 def log_msg(mensaje):
