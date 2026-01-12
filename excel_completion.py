@@ -2,8 +2,8 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 BASE_DIR = Path(__file__).resolve().parent
-INPUT_XLSX = BASE_DIR / "registro_curso_amor_sexualidad2.xlsx"
-OUTPUT_XLSX = BASE_DIR / "registro_curso_amor_sexualidad2_rellenado.xlsx"
+INPUT_XLSX = BASE_DIR / "excel" / "registro_curso_amor_sexualidad2.xlsx"
+OUTPUT_XLSX = BASE_DIR / "excel" / "registro_curso_amor_sexualidad2_rellenado.xlsx"
 WARN_LOG = BASE_DIR / "excel_completion_warnings.txt"
 
 SHEET_NAME = None  # None = hoja activa; o pon el nombre exacto, p.ej. "Hoja1"

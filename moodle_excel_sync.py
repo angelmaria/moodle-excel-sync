@@ -15,17 +15,104 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import time
 from datetime import datetime
+import os
+
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover
+    load_dotenv = None
 
 BASE_DIR = Path(__file__).resolve().parent
-EXCEL_FILE = BASE_DIR / 'registro_curso_amor_sexualidad3_faltantes_rellenado.xlsx'
-LOG_FILE = BASE_DIR / 'log_creacion_usuarios_faltantes3.txt'
+EXCEL_FILE = BASE_DIR / 'excel' / 'registro_curso_amor_sexualidad4_pendientes_moodle.xlsx'
+RUN_TS = datetime.now().strftime("%Y%m%d_%H%M%S")
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+LOG_FILE = LOG_DIR / f"log_moodle_sync__{EXCEL_FILE.stem}__{RUN_TS}.txt"
+
+if load_dotenv is not None:
+    load_dotenv(BASE_DIR / ".env")
+
+MOODLE_BASE_URL = os.getenv("MOODLE_BASE_URL", "https://campus.edufamilia.com").rstrip("/")
+MOODLE_ADMIN_USER = os.getenv("MOODLE_ADMIN_USER", "")
+MOODLE_ADMIN_PASSWORD = os.getenv("MOODLE_ADMIN_PASSWORD", "")
 
 # ===== CONFIGURACIÓN DE FILAS A PROCESAR =====
 # Define qué filas del Excel procesará el script
 # Si FILAS_A_PROCESAR es None, se procesará desde FILA_INICIO hasta la última fila del Excel
-FILA_INICIO = 2  # Primera fila de datos (encabezados en fila 1)
+FILA_INICIO = 2  # Encabezados en fila 1
 FILAS_A_PROCESAR = None  # Procesa todas las filas desde FILA_INICIO hasta el final
 # ============================================
+
+# Si un nombre/apellido viene TODO EN MAYÚSCULAS, Moodle no debería fallar por eso,
+# pero a veces es preferible normalizarlo para evitar resultados feos en la UI.
+# Esta normalización SOLO se aplica cuando el texto parece estar en mayúsculas.
+NORMALIZAR_MAYUSCULAS_A_TITULO = True
+
+
+def _solo_mayusculas(texto: str) -> bool:
+    letras = [c for c in texto if c.isalpha()]
+    return bool(letras) and all(c.isupper() for c in letras)
+
+
+def _normalizar_nombre(texto: str) -> str:
+    s = (texto or "").strip()
+    if not NORMALIZAR_MAYUSCULAS_A_TITULO:
+        return s
+    if _solo_mayusculas(s):
+        return s.title()
+    return s
+
+
+def _extraer_errores_moodle(driver) -> list[str]:
+    """Intenta capturar mensajes de error visibles tras guardar un formulario."""
+    errores: list[str] = []
+    try:
+        candidates = driver.find_elements(
+            By.XPATH,
+            "//div[contains(@class,'alert-danger') or contains(@class,'error') or @role='alert']"
+            " | //span[contains(@class,'error')]"
+            " | //div[contains(@class,'invalid-feedback')]",
+        )
+        for el in candidates:
+            try:
+                t = (el.text or "").strip()
+            except Exception:
+                t = ""
+            if t and t not in errores:
+                errores.append(t)
+    except Exception:
+        return []
+    return errores
+
+
+def _buscar_email_en_listado(driver, email: str) -> bool:
+    """Busca un email en la tabla de usuarios (admin/user.php) tras filtrar por email."""
+    wait = WebDriverWait(driver, 15)
+    driver.get(f"{MOODLE_BASE_URL}/admin/user.php")
+    time.sleep(2)
+
+    try:
+        mostrar_mas = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.moreless-toggler")))
+        mostrar_mas.click()
+        time.sleep(1)
+    except Exception:
+        pass
+
+    campo_email = wait.until(EC.presence_of_element_located((By.ID, "id_email")))
+    campo_email.clear()
+    campo_email.send_keys(email)
+    campo_email.send_keys(Keys.RETURN)
+    time.sleep(2)
+
+    # 1) Caso "No se encuentran usuarios"
+    if driver.find_elements(By.XPATH, "//*[contains(text(), 'No se encuentran usuarios')]"):
+        return False
+
+    # 2) Caso tabla con el email presente
+    if driver.find_elements(By.XPATH, f"//*[contains(normalize-space(.), '{email}')]"):
+        return True
+
+    return False
 
 def log_msg(mensaje):
     """Imprime mensaje con timestamp tanto en consola como en log"""
@@ -51,8 +138,8 @@ def leer_registros_excel(filas):
         if nombre and apellidos and email and usuario:
             registros.append({
                 'fila': fila,
-                'nombre': nombre.strip(),
-                'apellidos': apellidos.strip(),
+                'nombre': _normalizar_nombre(nombre),
+                'apellidos': _normalizar_nombre(apellidos),
                 'email': email.strip(),
                 'usuario': usuario.strip().lower(),
                 'contrasena': contrasena.strip() if contrasena else None
@@ -73,19 +160,24 @@ def obtener_filas_desde(inicio: int):
 def login_moodle(driver):
     """Inicia sesión en Moodle"""
     log_msg("\n✓ Iniciando sesión en Moodle...")
-    
-    driver.get("https://campus.edufamilia.com/admin/search.php")
+
+    if not MOODLE_ADMIN_USER or not MOODLE_ADMIN_PASSWORD:
+        raise RuntimeError(
+            "Faltan credenciales. Define MOODLE_ADMIN_USER y MOODLE_ADMIN_PASSWORD en el entorno o en el archivo .env"
+        )
+
+    driver.get(f"{MOODLE_BASE_URL}/admin/search.php")
     time.sleep(2)
     
     wait = WebDriverWait(driver, 15)
     
     # Usuario
     campo_usuario = wait.until(EC.presence_of_element_located((By.ID, "username")))
-    campo_usuario.send_keys("admin")
+    campo_usuario.send_keys(MOODLE_ADMIN_USER)
     
     # Contraseña
     campo_password = driver.find_element(By.ID, "password")
-    campo_password.send_keys("ax%$85-.BXD")
+    campo_password.send_keys(MOODLE_ADMIN_PASSWORD)
     
     # Click en Log in
     login_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Log in')]")
@@ -109,7 +201,7 @@ def procesar_usuario(driver, registro, es_primero=False):
     
     try:
         # 1. Ir a "Examinar lista de usuarios"
-        driver.get("https://campus.edufamilia.com/admin/user.php")
+        driver.get(f"{MOODLE_BASE_URL}/admin/user.php")
         time.sleep(2)
         
         # 2. Si NO es el primero, eliminar filtros anteriores
@@ -133,52 +225,68 @@ def procesar_usuario(driver, registro, es_primero=False):
         campo_email.send_keys(Keys.RETURN)
         time.sleep(3)
         
-        # 5. Verificar si encuentra usuarios
-        try:
-            # Verificar si dice "No se encuentran usuarios"
-            no_encontrado = driver.find_element(By.XPATH, "//*[contains(text(), 'No se encuentran usuarios')]")
+        # 5. Verificar si encuentra usuarios (sin usar except genérico)
+        if driver.find_elements(By.XPATH, "//*[contains(text(), 'No se encuentran usuarios')]"):
             log_msg(f"  → Usuario NO existe. Creando...")
-            
-            # Hacer clic en "Crear un nuevo usuario"
-            boton_crear = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Crear un nuevo usuario')]")))
+
+            boton_crear = wait.until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Crear un nuevo usuario')]"))
+            )
             boton_crear.click()
             time.sleep(2)
-            
-            # Llamar a la función de crear usuario (ya estamos en el formulario)
-            return crear_usuario_en_formulario(driver, registro)
-            
-        except:
-            # Si no encuentra el mensaje "No se encuentran usuarios", significa que SÍ existe
-            log_msg(f"  → Usuario YA existe. Editando...")
-            
-            # Hacer clic en el icono de configuración (engranaje) para editar
-            edit_icon = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='user/editadvanced.php'] i.fa-cog")))
-            edit_icon.click()
-            time.sleep(2)
-            
-            # Modificar Nombre
-            campo_nombre = wait.until(EC.presence_of_element_located((By.ID, "id_firstname")))
-            campo_nombre.clear()
-            campo_nombre.send_keys(nombre)
-            
-            # Modificar Apellidos
-            campo_apellido = driver.find_element(By.ID, "id_lastname")
-            campo_apellido.clear()
-            campo_apellido.send_keys(apellidos)
-            
-            # Guardar cambios
-            boton_guardar = driver.find_element(By.ID, "id_submitbutton")
-            driver.execute_script("arguments[0].scrollIntoView(true);", boton_guardar)
-            time.sleep(1)
-            boton_guardar.click()
-            time.sleep(3)
-            
+
+            ok = crear_usuario_en_formulario(driver, registro)
+            if not ok:
+                return "error"
+
+            # Verificación post-guardado
+            if _buscar_email_en_listado(driver, email):
+                log_msg("  ✓ Verificación: email aparece en la lista")
+                return "created"
+            log_msg("  ✗ Verificación fallida: no aparece el email en la lista")
+            return "error"
+
+        # Si no hay mensaje de no-encontrado, intentamos editar.
+        log_msg(f"  → Usuario YA existe (o no se mostró el mensaje). Editando...")
+
+        edit_icon = wait.until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='user/editadvanced.php'] i.fa-cog"))
+        )
+        edit_icon.click()
+        time.sleep(2)
+
+        campo_nombre = wait.until(EC.presence_of_element_located((By.ID, "id_firstname")))
+        campo_nombre.clear()
+        campo_nombre.send_keys(nombre)
+
+        campo_apellido = driver.find_element(By.ID, "id_lastname")
+        campo_apellido.clear()
+        campo_apellido.send_keys(apellidos)
+
+        boton_guardar = driver.find_element(By.ID, "id_submitbutton")
+        driver.execute_script("arguments[0].scrollIntoView(true);", boton_guardar)
+        time.sleep(1)
+        boton_guardar.click()
+        time.sleep(3)
+
+        errores = _extraer_errores_moodle(driver)
+        if errores:
+            for err in errores[:3]:
+                log_msg(f"  ✗ Error Moodle: {err[:160]}")
+            return "error"
+
+        if _buscar_email_en_listado(driver, email):
+            log_msg("  ✓ Verificación: email aparece en la lista")
             log_msg(f"  ✓✓ Usuario editado exitosamente")
-            return True
+            return "edited"
+
+        log_msg("  ⚠ Editado sin poder verificar en lista (posible filtro/export)")
+        return "edited"
             
     except Exception as e:
-        log_msg(f"  ✗ Error: {str(e)[:100]}")
-        return False
+        msg = str(e)
+        log_msg(f"  ✗ Error: {msg[:120]}")
+        return "error"
 
 def crear_usuario_en_formulario(driver, registro):
     """Crea un usuario cuando ya estamos en el formulario de creación"""
@@ -247,15 +355,15 @@ def crear_usuario_en_formulario(driver, registro):
         log_msg(f"  ✓ Haciendo click en 'Crear Usuario'")
         time.sleep(3)
         
-        # 8. Verificar error
-        try:
-            error = driver.find_element(By.CLASS_NAME, "alert-danger")
-            error_text = error.text
-            log_msg(f"  ✗ Error: {error_text[:80]}")
+        # 8. Verificar errores del formulario
+        errores = _extraer_errores_moodle(driver)
+        if errores:
+            for err in errores[:3]:
+                log_msg(f"  ✗ Error Moodle: {err[:160]}")
             return False
-        except:
-            log_msg(f"  ✓✓ Usuario creado exitosamente")
-            return True
+
+        log_msg(f"  ✓✓ Usuario creado exitosamente")
+        return True
             
     except Exception as e:
         log_msg(f"  ✗ Error: {str(e)[:100]}")
@@ -273,7 +381,7 @@ def crear_usuario_moodle(driver, registro):
     log_msg(f"\n[Fila {fila}] Creando usuario: {usuario}")
     log_msg(f"  Nombre: {nombre} | Apellidos: {apellidos} | Email: {email}")
     
-    crear_usuario_url = "https://campus.edufamilia.com/user/editadvanced.php?id=-1"
+    crear_usuario_url = f"{MOODLE_BASE_URL}/user/editadvanced.php?id=-1"
     driver.get(crear_usuario_url)
     time.sleep(2)
     
@@ -326,15 +434,19 @@ def crear_usuario_moodle(driver, registro):
         boton_crear.click()
         time.sleep(3)
         
-        # Verificar error
-        try:
-            error = driver.find_element(By.CLASS_NAME, "alert-danger")
-            error_text = error.text
-            log_msg(f"  ✗ Error: {error_text[:80]}")
+        errores = _extraer_errores_moodle(driver)
+        if errores:
+            for err in errores[:3]:
+                log_msg(f"  ✗ Error Moodle: {err[:160]}")
             return False
-        except:
+
+        if _buscar_email_en_listado(driver, email):
+            log_msg("  ✓ Verificación: email aparece en la lista")
             log_msg(f"  ✓✓ Usuario creado exitosamente")
             return True
+
+        log_msg("  ✗ Verificación fallida: no aparece el email en la lista")
+        return False
             
     except Exception as e:
         log_msg(f"  ✗ Error: {str(e)[:100]}")
@@ -349,7 +461,7 @@ def editar_usuario_moodle(driver, fila, nombre, apellidos, email):
     
     try:
         # 1. Ir a "Examinar lista de usuarios"
-        driver.get("https://campus.edufamilia.com/admin/user.php")
+        driver.get(f"{MOODLE_BASE_URL}/admin/user.php")
         time.sleep(2)
         
         # 2. Hacer clic en "Mostrar más..."
@@ -398,6 +510,8 @@ def main():
     log_msg("=" * 80)
     log_msg("PROCESAR USUARIOS EN MOODLE")
     log_msg("=" * 80)
+    log_msg(f"Excel: {EXCEL_FILE.name}")
+    log_msg(f"Log: {LOG_FILE.name}")
     
     # Configurar Chrome
     chrome_options = Options()
@@ -417,13 +531,23 @@ def main():
         for r in registros:
             log_msg(f"  - Fila {r['fila']}: {r['nombre']} {r['apellidos']}")
         
+        created = 0
+        edited = 0
+        errors = 0
         for idx, registro in enumerate(registros):
             es_primero = (idx == 0)
-            procesar_usuario(driver, registro, es_primero)
+            result = procesar_usuario(driver, registro, es_primero)
+            if result == "created":
+                created += 1
+            elif result == "edited":
+                edited += 1
+            else:
+                errors += 1
             time.sleep(1)
         
         log_msg("\n" + "=" * 80)
         log_msg("✓ Proceso completado")
+        log_msg(f"Resumen: creados={created}, editados={edited}, errores={errors}, total={len(registros)}")
         log_msg("=" * 80)
         
     except Exception as e:

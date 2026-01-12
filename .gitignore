@@ -1,8 +1,12 @@
-# ocultar archivos log y excel
+# ocultar archivos log y datos temporales
 *.log
 *.xls
 *.xlsx
 *.csv
+*.txt
+
+# credenciales
+.env
 
 # ocultar entornos virtuales de Python
 venv/
